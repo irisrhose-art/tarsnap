@@ -1,0 +1,59 @@
+name: Fabrica Bug Hunt
+
+on:
+  workflow_dispatch:
+
+jobs:
+  sanitizer:
+    runs-on: ubuntu-22.04
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v7
+      - name: Install dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends autoconf automake autoconf-archive pkg-config make clang libssl-dev zlib1g-dev e2fslibs-dev libbz2-dev liblzma-dev
+      - name: Configure
+        env:
+          CC: clang
+          CFLAGS: -O1 -g -fsanitize=address,undefined -fno-omit-frame-pointer
+          LDFLAGS: -fsanitize=address,undefined
+        run: |
+          autoreconf -i
+          ./configure
+      - name: Build
+        env:
+          CC: clang
+          CFLAGS: -O1 -g -fsanitize=address,undefined -fno-omit-frame-pointer
+          LDFLAGS: -fsanitize=address,undefined
+        run: make -j2
+      - name: Run tests under sanitizers
+        env:
+          ASAN_OPTIONS: detect_leaks=1:abort_on_error=1
+          UBSAN_OPTIONS: print_stacktrace=1:halt_on_error=1
+        run: make test VERBOSE=1
+
+  static-analysis:
+    runs-on: ubuntu-22.04
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v7
+      - name: Install dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends autoconf automake autoconf-archive pkg-config make clang clang-tools libssl-dev zlib1g-dev e2fslibs-dev libbz2-dev liblzma-dev
+      - name: Configure
+        run: |
+          autoreconf -i
+          CC=clang ./configure
+      - name: Run clang static analyzer
+        run: |
+          mkdir -p scan-report
+          scan-build --plist-html -o scan-report make -j2 || true
+          find scan-report -maxdepth 3 -type f | sort | head -200
+      - name: Upload analyzer report
+        uses: actions/upload-artifact@v4
+        with:
+          name: clang-static-analysis
+          path: scan-report
+          if-no-files-found: warn
